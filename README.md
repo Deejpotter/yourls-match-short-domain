@@ -35,7 +35,8 @@ Links that match no rule keep the main `YOURLS_SITE` address. The first matching
 
 YOURLS only allows each keyword once. With a prefix of `us-` on the `go.example.com` rule:
 
-- A link saved as `us-abc` is shown as `https://go.example.com/abc`.
+- A link to example.com created with the custom keyword `abc` is saved as `us-abc` automatically (typing `us-abc` yourself also works). Random keywords are left alone.
+- It's shown as `https://go.example.com/abc`.
 - Opening `https://go.example.com/abc` goes to `us-abc` if it exists. If it doesn't, YOURLS opens `abc` as normal.
 - `https://go.example.com/us-abc` still works directly.
 - Other domains are unaffected: `https://go.example.com.au/abc` opens `abc`.
@@ -45,6 +46,7 @@ Watch for: if the prefixed link was never created, `go.example.com/abc` silently
 ## How it works
 
 - `yourls_link` filter: changes the domain (and strips the prefix) wherever YOURLS displays or returns a short link: the new link box, the admin table, the API.
+- `custom_keyword` filter: adds the prefix to custom keywords for links matching a prefix rule.
 - `get_request` filter: on a short domain with a prefix rule, swaps `abc` for `us-abc` before YOURLS looks the keyword up. Only YOURLS's link loader uses this filter, so admin pages are unaffected.
 - Every hook is wrapped in a `try`/`catch`, so an error falls back to normal YOURLS behaviour instead of breaking redirects.
 

@@ -3,7 +3,7 @@
 Plugin Name: Match Short Domain to Destination
 Plugin URI: https://github.com/Deejpotter/yourls-match-short-domain
 Description: Shows each short link on the short domain that matches where it points, and can let the same keyword go to a different page on each short domain. Set up under "Match Short Domain Settings".
-Version: 2.1
+Version: 2.2
 Author: Daniel Potter
 Author URI: https://github.com/Deejpotter
 */
@@ -20,6 +20,8 @@ Author URI: https://github.com/Deejpotter
 //    (new link box, admin table, API). With a prefix, "us-abc" is shown as "short domain/abc".
 // 2. Redirects (only for rules with a prefix): opening "short domain/abc" goes to the
 //    "us-abc" link if it exists, otherwise YOURLS behaves as normal.
+// 3. New links (only for rules with a prefix): a custom keyword "abc" for a link to the
+//    destination site is saved as "us-abc" automatically, so nobody has to remember the prefix.
 // Any error inside the plugin is caught and YOURLS carries on as if the plugin wasn't there.
 // DP - 09/10/26
 
@@ -33,8 +35,10 @@ define( 'MS_MATCH_DOMAIN_OPTION', 'ms_match_domain_rules' );
 
 // yourls_link: so every place YOURLS shows a short link shows the matching domain.
 // get_request: so a shared keyword can lead to a different page on each short domain.
+// custom_keyword: so the prefix is added automatically when a link is created.
 // plugins_loaded: so staff can manage the rules from the admin.
 yourls_add_filter( 'yourls_link', 'ms_match_domain_link' );
+yourls_add_filter( 'custom_keyword', 'ms_match_domain_custom_keyword' );
 yourls_add_filter( 'get_request', 'ms_match_domain_request' );
 yourls_add_action( 'plugins_loaded', 'ms_match_domain_add_page' );
 
@@ -131,6 +135,34 @@ function ms_match_domain_link( $link, $keyword = '' ) {
 	}
 
 	return $link;
+}
+
+/**
+ * Purpose: people shouldn't have to remember the prefix. When a link is created with a custom
+ * keyword (e.g. "abc") and its destination matches a rule with a prefix (e.g. us-), save it as
+ * "us-abc". It's still shown and used as "short domain/abc". Random keywords are left alone:
+ * they're unique anyway, so they never need a prefix.
+ */
+function ms_match_domain_custom_keyword( $keyword, $url = '', $title = '' ) {
+	try {
+		$dest_host = strtolower( (string) parse_url( (string) $url, PHP_URL_HOST ) );
+		if ( '' === $keyword || '' === $dest_host ) {
+			return $keyword;
+		}
+		foreach ( ms_match_domain_rules() as $rule ) {
+			if ( ! ms_match_domain_host_matches( $dest_host, $rule['dest'] ) ) {
+				continue;
+			}
+			// Add the prefix only if the rule has one and the person didn't already type it.
+			if ( '' !== $rule['prefix'] && 0 !== strpos( $keyword, $rule['prefix'] ) ) {
+				return $rule['prefix'] . $keyword;
+			}
+			return $keyword;
+		}
+	} catch ( \Throwable $e ) {
+		// A problem here must never stop links being created: keep the keyword as typed.
+	}
+	return $keyword;
 }
 
 /**
@@ -316,7 +348,7 @@ function ms_match_domain_page() {
 			<ul>
 			<li><strong>Destination site:</strong> the site the links go to, as a domain only, e.g. <code>example.com</code>. No <code>https://</code> and no <code>/</code> (if you paste them, they're removed). It also covers <code>www.example.com</code> and other subdomains.</li>
 			<li><strong>Short domain:</strong> the short link domain to show those links on, e.g. <code>go.example.com</code>. Domain only, as above. It must already open this YOURLS (set up in DNS and your hosting first).</li>
-			<li><strong>Keyword prefix</strong> (optional): lets the same keyword go to a different page on each short domain. With <code>us-</code>, save the link as <code>us-abc</code>; it's shown as <code>go.example.com/abc</code>, and opening <code>go.example.com/abc</code> goes to <code>us-abc</code>. If there's no <code>us-abc</code>, it opens <code>abc</code> as normal. Leave it blank to only change the displayed domain.</li>
+			<li><strong>Keyword prefix</strong> (optional): lets the same keyword go to a different page on each short domain. With <code>us-</code>, a link to the destination site made with keyword <code>abc</code> is saved as <code>us-abc</code> automatically; it's shown as <code>go.example.com/abc</code>, and opening <code>go.example.com/abc</code> goes to <code>us-abc</code>. If there's no <code>us-abc</code>, it opens <code>abc</code> as normal. Leave it blank to only change the displayed domain.</li>
 			</ul>
 		</main>
 HTML;
