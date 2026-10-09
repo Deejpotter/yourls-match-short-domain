@@ -3,7 +3,7 @@
 Plugin Name: Match Short Domain to Destination
 Plugin URI: https://github.com/Deejpotter/yourls-match-short-domain
 Description: Shows each short link on the short domain that matches where it points, and can let the same keyword go to a different page on each short domain. Set up under "Match Short Domain Settings".
-Version: 2.0
+Version: 2.1
 Author: Daniel Potter
 Author URI: https://github.com/Deejpotter
 */
@@ -190,27 +190,81 @@ function ms_match_domain_clean_host( $value ) {
 }
 
 /**
- * Save the settings form. Incomplete or invalid rows are dropped rather than saved, so a typo
- * can't create a rule that sends links to a broken domain.
+ * Check one submitted row. Returns the clean rule, or an error message so the user knows
+ * exactly what to fix instead of the row silently disappearing.
+ */
+function ms_match_domain_check_row( $dest_in, $short_in, $prefix_in ) {
+	$dest_in   = trim( (string) $dest_in );
+	$short_in  = trim( (string) $short_in );
+	$prefix_in = trim( (string) $prefix_in );
+
+	// A fully empty row is the spare "add a rule" row (or a rule being removed): not an error.
+	if ( '' === $dest_in && '' === $short_in && '' === $prefix_in ) {
+		return null;
+	}
+	if ( '' === $dest_in ) {
+		return 'destination site is missing';
+	}
+	if ( '' === $short_in ) {
+		return 'short domain is missing';
+	}
+
+	$dest  = ms_match_domain_clean_host( $dest_in );
+	$short = ms_match_domain_clean_host( $short_in );
+	if ( '' === $dest ) {
+		return 'destination site "' . $dest_in . '" isn\'t a valid domain';
+	}
+	if ( '' === $short ) {
+		return 'short domain "' . $short_in . '" isn\'t a valid domain';
+	}
+
+	// A prefix with characters YOURLS doesn't allow in keywords could never match a real link.
+	$prefix = yourls_sanitize_keyword( $prefix_in );
+	if ( $prefix !== $prefix_in ) {
+		return 'keyword prefix "' . $prefix_in . '" can only use characters allowed in short URLs';
+	}
+
+	return array( 'dest' => $dest, 'short' => $short, 'prefix' => $prefix );
+}
+
+/**
+ * Save the settings form. Only valid rows are saved, so a typo can't create a rule that sends
+ * links to a broken domain. Invalid rows are returned with their errors so the page can show
+ * them, filled in as typed, for fixing.
  */
 function ms_match_domain_save() {
 	$dests    = isset( $_POST['dest'] ) ? (array) $_POST['dest'] : array();
 	$shorts   = isset( $_POST['short'] ) ? (array) $_POST['short'] : array();
 	$prefixes = isset( $_POST['prefix'] ) ? (array) $_POST['prefix'] : array();
 
-	$rules = array();
+	$rules  = array();
+	$failed = array();
+	$row    = 0;
 	foreach ( $dests as $i => $dest ) {
-		$dest  = ms_match_domain_clean_host( $dest );
-		$short = ms_match_domain_clean_host( isset( $shorts[ $i ] ) ? $shorts[ $i ] : '' );
-		// A prefix with characters YOURLS doesn't allow in keywords could never match a real link.
-		$prefix = yourls_sanitize_keyword( isset( $prefixes[ $i ] ) ? $prefixes[ $i ] : '' );
-		if ( '' !== $dest && '' !== $short ) {
-			$rules[] = array( 'dest' => $dest, 'short' => $short, 'prefix' => $prefix );
+		$row++;
+		$short  = isset( $shorts[ $i ] ) ? $shorts[ $i ] : '';
+		$prefix = isset( $prefixes[ $i ] ) ? $prefixes[ $i ] : '';
+		$result = ms_match_domain_check_row( $dest, $short, $prefix );
+		if ( is_array( $result ) ) {
+			$rules[] = $result;
+		} elseif ( is_string( $result ) ) {
+			$failed[] = array( 'row' => $row, 'error' => $result, 'dest' => (string) $dest, 'short' => (string) $short, 'prefix' => (string) $prefix );
 		}
 	}
 
 	yourls_update_option( MS_MATCH_DOMAIN_OPTION, $rules );
-	return count( $rules );
+	return array( 'saved' => count( $rules ), 'failed' => $failed );
+}
+
+/**
+ * One row of the settings table.
+ */
+function ms_match_domain_row_html( $dest, $short, $prefix ) {
+	return '<tr>'
+		. '<td><input type="text" name="dest[]" value="' . yourls_esc_attr( $dest ) . '" placeholder="e.g. example.com" /></td>'
+		. '<td><input type="text" name="short[]" value="' . yourls_esc_attr( $short ) . '" placeholder="e.g. go.example.com" /></td>'
+		. '<td><input type="text" name="prefix[]" value="' . yourls_esc_attr( $prefix ) . '" placeholder="optional, e.g. us-" size="12" /></td>'
+		. '</tr>';
 }
 
 /**
@@ -219,37 +273,37 @@ function ms_match_domain_save() {
  */
 function ms_match_domain_page() {
 	$message = '';
+	$failed  = array();
 	if ( isset( $_POST['dest'] ) ) {
 		yourls_verify_nonce( 'ms_match_domain' );
-		$message = '<p><strong>Saved ' . (int) ms_match_domain_save() . ' rule(s).</strong></p>';
+		$result  = ms_match_domain_save();
+		$failed  = $result['failed'];
+		$message = '<p><strong>Saved ' . (int) $result['saved'] . ' rule(s).</strong></p>';
+		foreach ( $failed as $f ) {
+			// Escaped because it repeats what the user typed.
+			$message .= '<p style="color:#b00"><strong>Row ' . (int) $f['row'] . ' not saved:</strong> ' . yourls_esc_html( $f['error'] ) . '. It\'s still in the form below so you can fix it.</p>';
+		}
 	}
 
 	$nonce = yourls_create_nonce( 'ms_match_domain' );
-	$rules = ms_match_domain_rules();
-	// Spare empty rows so new rules can be added without extra buttons or JavaScript.
-	for ( $i = 0; $i < 3; $i++ ) {
-		$rules[] = array( 'dest' => '', 'short' => '', 'prefix' => '' );
-	}
 
 	$rows = '';
-	foreach ( $rules as $rule ) {
-		$rows .= '<tr>'
-			. '<td><input type="text" name="dest[]" value="' . yourls_esc_attr( $rule['dest'] ) . '" placeholder="example.com" /></td>'
-			. '<td><input type="text" name="short[]" value="' . yourls_esc_attr( $rule['short'] ) . '" placeholder="go.example.com" /></td>'
-			. '<td><input type="text" name="prefix[]" value="' . yourls_esc_attr( $rule['prefix'] ) . '" placeholder="us- (optional)" size="10" /></td>'
-			. '</tr>';
+	foreach ( ms_match_domain_rules() as $rule ) {
+		$rows .= ms_match_domain_row_html( $rule['dest'], $rule['short'], $rule['prefix'] );
 	}
+	// Rows that failed come back as typed, so nothing the user entered is lost.
+	foreach ( $failed as $f ) {
+		$rows .= ms_match_domain_row_html( $f['dest'], $f['short'], $f['prefix'] );
+	}
+	// One spare empty row for the next rule; a new one appears after each save.
+	$rows .= ms_match_domain_row_html( '', '', '' );
 
 	echo <<<HTML
 		<main>
 			<h2>Match Short Domain Settings</h2>
 			$message
-			<p>Each row: links pointing at the <strong>destination site</strong> (or its www. and other subdomains) are shown on the <strong>short domain</strong>.
-			The short domain must already serve this YOURLS install. Links not matching any row keep the main address.</p>
-			<p><strong>Keyword prefix</strong> (optional): with <code>us-</code>, a link saved as <code>us-abc</code> is shown as <code>short domain/abc</code>,
-			and opening <code>short domain/abc</code> goes to <code>us-abc</code>. If there's no <code>us-abc</code>, it opens <code>abc</code> as normal.
-			Leave it blank to only change the displayed domain.</p>
-			<p>To remove a row, clear its destination site and save.</p>
+			<p>Each rule shows links on the right short domain. Fill in the empty row and click <strong>Save</strong>; a new empty row appears for the next rule.
+			Links that don't match any rule keep the main address. To remove a rule, clear all its boxes and save.</p>
 			<form method="post">
 			<input type="hidden" name="nonce" value="$nonce" />
 			<table>
@@ -258,6 +312,12 @@ function ms_match_domain_page() {
 			</table>
 			<p><input type="submit" value="Save" class="button" /></p>
 			</form>
+			<h3>What to enter</h3>
+			<ul>
+			<li><strong>Destination site:</strong> the site the links go to, as a domain only, e.g. <code>example.com</code>. No <code>https://</code> and no <code>/</code> (if you paste them, they're removed). It also covers <code>www.example.com</code> and other subdomains.</li>
+			<li><strong>Short domain:</strong> the short link domain to show those links on, e.g. <code>go.example.com</code>. Domain only, as above. It must already open this YOURLS (set up in DNS and your hosting first).</li>
+			<li><strong>Keyword prefix</strong> (optional): lets the same keyword go to a different page on each short domain. With <code>us-</code>, save the link as <code>us-abc</code>; it's shown as <code>go.example.com/abc</code>, and opening <code>go.example.com/abc</code> goes to <code>us-abc</code>. If there's no <code>us-abc</code>, it opens <code>abc</code> as normal. Leave it blank to only change the displayed domain.</li>
+			</ul>
 		</main>
 HTML;
 }

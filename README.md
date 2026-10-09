@@ -27,6 +27,8 @@ Each rule has three fields:
 | Short domain | `go.example.com` | The short domain those links are shown on |
 | Keyword prefix | `us-` (optional) | See below. Leave blank to only change the displayed domain |
 
+Enter domains only: no `https://` and no `/` (they're removed if pasted). The page always shows one empty row for the next rule; a new one appears after each save. Rows that can't be saved are shown with the reason and kept in the form for fixing. To remove a rule, clear all its boxes and save.
+
 Links that match no rule keep the main `YOURLS_SITE` address. The first matching rule wins.
 
 ### Keyword prefix (same keyword on each domain)
