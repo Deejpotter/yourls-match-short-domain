@@ -50,3 +50,7 @@ Watch for: if the prefixed link was never created, `go.example.com/abc` silently
 
 - The YOURLS admin only works on the `YOURLS_SITE` address. Short links work on every domain.
 - After a YOURLS update, test one link per rule.
+
+## Licence
+
+MIT. See [LICENSE](LICENSE).
